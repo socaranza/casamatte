@@ -1,3 +1,5 @@
+<?php 
+
 // Función para crear un post del tipo "photobook-2-0" cuando se guarda una entrada de Gravity Forms
 add_action('gform_entry_created', 'crear_post_photobook', 10, 2);
 function crear_post_photobook($entry, $form) {
@@ -162,3 +164,5 @@ function crear_post_photobook($entry, $form) {
         exit; // Termina el script después de redirigir
     }
 }
+
+
