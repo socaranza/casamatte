@@ -1,3 +1,5 @@
+<?php 
+
 // Función para crear una entrada de photobook cuando se crea un nuevo pedido
 function create_photobook_entry($pedido_id) {
     // Verificar si ya existe una entrada de photobook asociada a este pedido
