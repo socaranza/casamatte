@@ -1,0 +1,23 @@
+add_action( 'woocommerce_before_calculate_totals', 'aplicar_cupon_producto_especifico' );
+
+function aplicar_cupon_producto_especifico( $cart ) {
+    // ID del producto específico para el cual deseas aplicar el cupón
+    $product_id_especifico = 13568; // Reemplazar por el ID de tu producto
+    $cupón = '10copiaphotobook'; // Reemplazar por tu código de cupón
+
+    // Verifica si el cupón ya está aplicado
+    if ( WC()->cart->has_discount( $cupón ) ) {
+        return;
+    }
+
+    // Recorre los productos en el carrito
+    foreach ( $cart->get_cart() as $cart_item ) {
+        if ( $cart_item['product_id'] == $product_id_especifico ) {
+            // Aplica el cupón si se encuentra el producto específico en el carrito
+            WC()->cart->apply_coupon( $cupón );
+            wc_print_notices(); // Muestra las notificaciones
+            break;
+        }
+    }
+}
+
