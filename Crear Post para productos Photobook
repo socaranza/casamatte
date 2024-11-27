@@ -1,1 +1,230 @@
+// Función para crear una entrada de photobook cuando se crea un nuevo pedido
+function create_photobook_entry($pedido_id) {
+    // Verificar si ya existe una entrada de photobook asociada a este pedido
+    $existing_photobook = new WP_Query(array(
+        'post_type'   => 'photobook-2-0',
+        'meta_key'    => 'id_del_pedido',
+        'meta_value'  => $pedido_id,
+        'posts_per_page' => 1,
+        'post_status' => 'any'
+    ));
 
+    if ($existing_photobook->have_posts()) {
+        // Si ya existe un photobook para este pedido, no hacemos nada
+        return;
+    }
+
+    // Obtener el pedido
+    $pedido = wc_get_order($pedido_id);
+    if (!$pedido) {
+        return; // Si el pedido no existe, salimos
+    }
+
+    // Obtener el ID del usuario
+    $user_id = $pedido->get_user_id();
+
+    global $wpdb;
+
+    // Obtener el order_item_id desde la tabla de metadatos del pedido
+    $order_item_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT order_item_id FROM wpie_woocommerce_order_items WHERE order_id = %d LIMIT 1",
+        $pedido_id
+    ));
+
+    // Inicializar variables
+    $nombre_producto = '';
+    $producto_id = '';
+    $titulo_personalizado = '';
+    $servicio_de_diseno = '';
+    $precio_total = '';
+    $metadatos = [];
+
+    if ($order_item_id) {
+        // Obtener el nombre del producto
+        $nombre_producto = $wpdb->get_var($wpdb->prepare(
+            "SELECT order_item_name FROM wpie_woocommerce_order_items WHERE order_item_id = %d",
+            $order_item_id
+        ));
+
+        // Obtener el ID del producto
+        $producto_id = $wpdb->get_var($wpdb->prepare(
+            "SELECT meta_value FROM wpie_woocommerce_order_itemmeta WHERE order_item_id = %d AND meta_key = '_product_id'",
+            $order_item_id
+        ));
+
+        // Verificar si el producto tiene la etiqueta 'photobook'
+        if (!has_term('photobook', 'product_tag', $producto_id)) {
+            return; // Si el producto no tiene la etiqueta 'photobook', salimos
+        }
+
+        // Obtener el metadato SERVICIO DE DISEÑO
+        $servicio_de_diseno = $wpdb->get_var($wpdb->prepare(
+            "SELECT meta_value FROM wpie_woocommerce_order_itemmeta WHERE order_item_id = %d AND meta_key = 'SERVICIO DE DISEÑO'",
+            $order_item_id
+        ));
+
+        // Verificar si SERVICIO DE DISEÑO contiene "tiempo de entrega más rápido"
+        if (strpos($servicio_de_diseno, 'tiempo de entrega más rápido') !== false) {
+            return; // No crear el post si contiene "tiempo de entrega más rápido"
+        }
+
+        // Obtener el metadato TÍTULO si existe
+        $titulo_personalizado = $wpdb->get_var($wpdb->prepare(
+            "SELECT meta_value FROM wpie_woocommerce_order_itemmeta WHERE order_item_id = %d AND meta_key = 'TÍTULO'",
+            $order_item_id
+        ));
+
+        // Obtener el valor del meta key '_line_total' para actualizar el precio total
+        $precio_total = $wpdb->get_var($wpdb->prepare(
+            "SELECT meta_value FROM wpie_woocommerce_order_itemmeta WHERE order_item_id = %d AND meta_key = '_line_total'",
+            $order_item_id
+        ));
+    }
+
+    // Crear el título del post
+    $titulo_post = $titulo_personalizado ? sanitize_text_field($titulo_personalizado) : ($nombre_producto ? sanitize_text_field($nombre_producto) : (string)$pedido_id);
+
+    // Crear el nuevo post del tipo "photobook-2-0"
+    $nuevo_post = array(
+        'post_title'    => $titulo_post,
+        'post_content'  => '',
+        'post_status'   => 'publish',
+        'post_type'     => 'photobook-2-0',
+        'post_author'   => $user_id
+    );
+
+    // Insertar el post y obtener el ID del nuevo post
+    $nuevo_post_id = wp_insert_post($nuevo_post);
+
+    if ($nuevo_post_id) {
+        // Guardar el precio total en el metadato 'precio_total'
+        if ($precio_total) {
+            update_post_meta($nuevo_post_id, 'precio_total', sanitize_text_field($precio_total));
+        }
+
+        // Obtenemos el username y correo del usuario basado en el user_id
+        $user_info = get_userdata($user_id);
+        if (!$user_info) {
+            return false; // Si el usuario no existe, retornamos false
+        }
+        $username = $user_info->user_login;
+        $user_email = $user_info->user_email;
+
+        // Guardar el correo del autor en el metadato 'correo_del_autor'
+        update_post_meta($nuevo_post_id, 'correo_del_autor', sanitize_email($user_email));
+
+        // Verificar si el metadato SERVICIO DE DISEÑO contiene "tiempo de entrega más rápido"
+        $entrega_rapida = strpos($servicio_de_diseno, 'tiempo de entrega más rápido') !== false;
+
+        if ($entrega_rapida) {
+            $ruta_software = 'heroic-tapioca-66d6ac.netlify.app/dashboard/frontpage?username=' . urlencode($username) . '&postId=' . $nuevo_post_id;
+            update_post_meta($nuevo_post_id, 'ruta_software', esc_url($ruta_software));
+            update_post_meta($nuevo_post_id, 'status', 25); // Para entrega rápida
+        } else {
+            update_post_meta($nuevo_post_id, 'ruta_software', '');
+            update_post_meta($nuevo_post_id, 'status', 20); // Para entrega normal
+        }
+
+        // Guardar el título del producto en el metadato 'modelo'
+        if ($nombre_producto) {
+            update_post_meta($nuevo_post_id, 'modelo', sanitize_text_field($nombre_producto));
+        }
+
+        // Guardar el ID del pedido en el metadato 'id_del_pedido'
+        update_post_meta($nuevo_post_id, 'id_del_pedido', sanitize_text_field($pedido_id));
+
+        // Obtener la URL de pago pendiente sin parámetros
+        $url_pago_pendiente = $pedido->get_checkout_payment_url(false);
+
+        // Añadir primero el parámetro 'pay_for_order=true' y luego el parámetro 'key'
+        $pay_for_order_url = add_query_arg(array(
+            'pay_for_order' => 'true',
+            'key' => $pedido->get_order_key()
+        ), $url_pago_pendiente);
+
+        // Guardar la URL de pago en el metadato 'url_de_pago_pendiente'
+        update_post_meta($nuevo_post_id, 'url_de_pago_pendiente', esc_url($pay_for_order_url));
+
+        // Obtener la imagen destacada del producto
+        if ($producto_id) {
+            $thumbnail_id = get_post_thumbnail_id($producto_id);
+            if ($thumbnail_id) {
+                set_post_thumbnail($nuevo_post_id, $thumbnail_id);
+            }
+        }
+
+        // Obtener los metadatos adicionales
+        $metadatos = $wpdb->get_results($wpdb->prepare(
+            "SELECT meta_key, meta_value FROM wpie_woocommerce_order_itemmeta WHERE order_item_id = %d AND meta_key IN ('SERVICIO DE DISEÑO', 'TAMAÑO', 'NÚMERO DE PÁGINAS', 'PASTA', 'PAPEL', 'EMPAQUE', 'NÚMERO DE FOTOS', 'BRIGHT @{:153:value}', 'NUDE @{:159:value}', 'TÍTULO IMPRESO O GRABADO', 'COLOR DE GRABADO @{:155:value}', 'GRABADO EN LOMO', 'COLOR PAPEL FORRO @{:153:value}', 'COLOR DE GRABADO @{:165:value}', 'MATERIAL DE FORRO', 'COLOR DE PIEL SINTÉTICA @{:160:value}', 'NUDE @{:167:value}', 'VENTANAS', 'NUDE @{:173:value}', 'COLOR DE TELA @{:153:value}', 'GRABADO EN EL LOMO', 'BRIGHT @{:170:value}', 'NUDE @{:171:value}', 'PIEL VEGANA @{:172:value}', 'CURPIEL @{:173:value}', 'GRABADO @{:174:value}', 'COLOR DE TELA @{:159:value}' )",
+            $order_item_id
+        ));
+
+        foreach ($metadatos as $meta) {
+            switch ($meta->meta_key) {
+                case 'SERVICIO DE DISEÑO':
+                    update_post_meta($nuevo_post_id, 'servicio_de_diseno', sanitize_text_field($meta->meta_value));
+                    break;
+                case 'TAMAÑO':
+                    update_post_meta($nuevo_post_id, 'tamano', sanitize_text_field($meta->meta_value));
+                    break;
+                case 'NÚMERO DE PÁGINAS':
+                    update_post_meta($nuevo_post_id, 'numero_de_paginas', sanitize_text_field($meta->meta_value));
+                    break;
+                case 'PASTA':
+                    update_post_meta($nuevo_post_id, 'pasta', sanitize_text_field($meta->meta_value));
+                    break;
+                case 'PAPEL':
+                    update_post_meta($nuevo_post_id, 'papel', sanitize_text_field($meta->meta_value));
+                    break;
+				case 'COLOR PAPEL FORRO @{:153:value}':
+                    update_post_meta($nuevo_post_id, 'color_papel_forro', sanitize_text_field($meta->meta_value));
+                    break;	
+                case 'EMPAQUE':
+                    update_post_meta($nuevo_post_id, 'empaque', sanitize_text_field($meta->meta_value));
+                    break;
+                case 'NÚMERO DE FOTOS':
+                    update_post_meta($nuevo_post_id, 'fotos', sanitize_text_field($meta->meta_value));
+                    break;
+				case 'BRIGHT @{:153:value}':
+				case 'BRIGHT @{:170:value}':
+				case 'PIEL VEGANA @{:172:value}':	
+				case 'CURPIEL @{:173:value}':	
+				case 'NUDE @{:171:value}':	
+                case 'NUDE @{:159:value}':
+				case 'NUDE @{:167:value}':
+				case 'NUDE @{:173:value}':	
+				case 'COLOR DE TELA @{:153:value}':	
+				case 'COLOR DE TELA @{:159:value}':	
+				case 'COLOR DE PIEL SINTÉTICA @{:160:value}':	
+				case 'COLOR DE PIEL RECICLADA @{:160:value}':	
+                    update_post_meta($nuevo_post_id, 'color_de_tela', sanitize_text_field($meta->meta_value));
+                    break;
+                case 'TÍTULO IMPRESO O GRABADO':
+                    update_post_meta($nuevo_post_id, 'titulo_impreso_o_grabado', sanitize_text_field($meta->meta_value));
+                    break;
+				case 'MATERIAL DE FORRO':
+                    update_post_meta($nuevo_post_id, 'material_de_forro', sanitize_text_field($meta->meta_value));
+                    break;	
+                case 'COLOR DE GRABADO @{:155:value}':
+				case 'GRABADO @{:174:value}':	
+				case 'COLOR DE GRABADO @{:165:value}':	
+                    update_post_meta($nuevo_post_id, 'color_de_grabado', sanitize_text_field($meta->meta_value));
+                    break;
+                case 'GRABADO EN LOMO':
+				case 'GRABADO EN EL LOMO':	
+                    update_post_meta($nuevo_post_id, 'grabado_en_lomo', sanitize_text_field($meta->meta_value));
+                    break;
+				case 'VENTANAS':
+                    update_post_meta($nuevo_post_id, 'ventanas', sanitize_text_field($meta->meta_value));
+                    break;
+            }
+        }
+
+        return $nuevo_post_id; // Retornamos el ID del nuevo post creado
+    }
+
+    return false; // Si no se pudo crear el post, retornamos false
+}
+
+// Hook para ejecutar la función cuando se cree un nuevo pedido
+add_action('woocommerce_checkout_order_processed', 'create_photobook_entry');
