@@ -1,0 +1,34 @@
+add_filter('woocommerce_available_payment_gateways', 'custom_filter_payment_gateways', 10, 1);
+
+function custom_filter_payment_gateways($available_gateways) {
+    // Verifica si estamos en la página de pago de un pedido (order-pay)
+    if (!is_wc_endpoint_url('order-pay')) {
+        return $available_gateways; // Devuelve todas las pasarelas si no es order-pay
+    }
+
+    // Obtén el usuario actual
+    $current_user_id = get_current_user_id();
+
+    // ID del usuario específico que solo verá "other_payment"
+    $specific_user_id = 35;
+
+    // Slug de la pasarela de pago "other_payment"
+    $other_payment_gateway_id = 'other_payment';
+
+    if ($current_user_id === $specific_user_id) {
+        // Filtrar para mostrar únicamente "other_payment"
+        if (isset($available_gateways[$other_payment_gateway_id])) {
+            return [$other_payment_gateway_id => $available_gateways[$other_payment_gateway_id]];
+        } else {
+            // Si "other_payment" no está configurada, devuelve un array vacío
+            return [];
+        }
+    }
+
+    // Para otros usuarios, elimina "other_payment" si está presente
+    if (isset($available_gateways[$other_payment_gateway_id])) {
+        unset($available_gateways[$other_payment_gateway_id]);
+    }
+
+    return $available_gateways; // Devuelve el resto de pasarelas disponibles
+}
