@@ -1,0 +1,42 @@
+add_action('init', 'casamatte_register_custom_order_status');
+
+function casamatte_register_custom_order_status() {
+    register_post_status('wc-casamatte', array(
+        'label'                     => _x('Casamatte', 'Order status', 'woocommerce'),
+        'public'                    => true,
+        'exclude_from_search'       => false,
+        'show_in_admin_all_list'    => true,
+        'show_in_admin_status_list' => true,
+        'label_count'               => _n_noop('Casamatte (%s)', 'Casamatte (%s)', 'woocommerce'),
+    ));
+}
+
+add_filter('wc_order_statuses', 'casamatte_add_custom_order_status_to_list');
+
+function casamatte_add_custom_order_status_to_list($order_statuses) {
+    $new_statuses = array();
+
+    // Insert the new status after "processing"
+    foreach ($order_statuses as $key => $status) {
+        $new_statuses[$key] = $status;
+
+        if ('wc-processing' === $key) {
+            $new_statuses['wc-casamatte'] = _x('Casamatte', 'Order status', 'woocommerce');
+        }
+    }
+
+    return $new_statuses;
+}
+
+add_action('admin_head', 'casamatte_add_custom_order_status_style');
+
+function casamatte_add_custom_order_status_style() {
+    ?>
+    <style>
+        .order-status.status-casamatte {
+            background: #efede7; /* Color similar al estado "processing" */
+            color: #000;
+        }
+    </style>
+    <?php
+}
